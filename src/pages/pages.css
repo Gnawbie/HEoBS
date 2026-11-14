@@ -180,3 +180,7 @@ dialog a.button.primary:hover { background: #8bbaff; }
 dialog input[type="password"] { margin-top: 4px; }
 button:disabled { opacity: .5; cursor: default; }
 #gsb-setup { scroll-margin-top: 20px; }
+
+/* compact checkbox inside a label row */
+.choice.compact { padding: 4px 8px; align-items: center; }
+.choice.compact input { margin-top: 0; }

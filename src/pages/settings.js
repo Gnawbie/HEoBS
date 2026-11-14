@@ -304,6 +304,20 @@ function renderExceptions() {
   renderSiteList('popupAllowedSites', 'sites-popups', 'None.');
 }
 
+async function renderStorage(note) {
+  const u = await call('storage.usage');
+  const mb = u.cacheBytes / (1024 * 1024);
+  $('cache-usage').textContent = (note ? note + ' ' : '') + `Using ${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB of at most ${u.limitMB} MB.`;
+  $('cache-on-exit').checked = !!(await call('settings.get')).settings.clearCacheOnExit;
+}
+$('cache-on-exit').addEventListener('change', async (e) => { await call('settings.set', 'clearCacheOnExit', e.target.checked); });
+$('cache-clear').addEventListener('click', async () => {
+  $('cache-clear').disabled = true;
+  await call('storage.clearCache');
+  $('cache-clear').disabled = false;
+  renderStorage('Cleared.');
+});
+
 async function renderTrusted() {
   const list = await call('trusted.list');
   const box = $('trusted-list');
@@ -331,5 +345,6 @@ renderBrowsers();
 renderTrusted();
 renderExceptions();
 renderGsb();
+renderStorage();
 window.mountAutoClear($('autoclear-history'), 'history');
 window.mountAutoClear($('autoclear-cookies'), 'cookies');

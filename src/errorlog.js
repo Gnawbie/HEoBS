@@ -56,8 +56,26 @@ function attach(wc) {
   wc.on('certificate-error', (_e, url, err) => error('certificate', err, url));
 }
 
+const LOG_LIMIT = 2 * 1024 * 1024;
+const LOG_KEEP = 512 * 1024;
+
+/** Keeps only the newest part of the log once it passes the size limit. */
+function trimLog() {
+  try {
+    const size = fs.statSync(logFile).size;
+    if (size <= LOG_LIMIT) return;
+    const fd = fs.openSync(logFile, 'r');
+    const tail = Buffer.alloc(LOG_KEEP);
+    fs.readSync(fd, tail, 0, LOG_KEEP, size - LOG_KEEP);
+    fs.closeSync(fd);
+    const text = tail.toString('utf8');
+    fs.writeFileSync(logFile, '(older entries removed to keep this file small)\n' + text.slice(text.indexOf('\n') + 1));
+  } catch { /* no log yet */ }
+}
+
 function init() {
   if (!enabled) return;
+  trimLog();
   write('start', '----------------------------------------------------------------');
   write('start', `HEoBS ${app.getVersion()} test build | Electron ${process.versions.electron} | Chromium ${process.versions.chrome} | ${process.platform} ${process.getSystemVersion()}`);
 

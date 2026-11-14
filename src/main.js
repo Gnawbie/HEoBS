@@ -16,6 +16,11 @@ const importer = require('./importer');
 
 app.setName('HEoBS');
 
+// Chromium keeps copies of web files (images, scripts) to load pages faster.
+// Left alone that cache can grow to hundreds of megabytes; cap it.
+const CACHE_LIMIT_MB = 100;
+app.commandLine.appendSwitch('disk-cache-size', String(CACHE_LIMIT_MB * 1024 * 1024));
+
 const errorLog = require('./errorlog');
 errorLog.init();
 
@@ -59,13 +64,14 @@ const DEFAULT_SETTINGS = {
   // Auto-clear: 0 = keep, -1 = clear when HEoBS closes, otherwise maximum age in milliseconds.
   historyKeepMs: 0,
   cookiesKeepMs: 0,
+  clearCacheOnExit: false, // also empty the cache of web files each time HEoBS closes
   // Sites whose sign-in cookies survive every kind of clearing. Nothing else about them is kept.
   trustedSites: [],
   // Start-page shortcuts chosen by the user: [{ title, url }]
   shortcuts: [],
   addons: [],
 };
-const BOOLEAN_SETTINGS = ['blockTrackers', 'blockAds', 'blockPopups', 'blockAddonTrackers', 'blockThirdPartyCookies', 'stripTrackingParams', 'sendDoNotTrack', 'autoUpdateBlocklist', 'safeBrowsing', 'googleSafeBrowsing', 'spellcheck', 'crashReports'];
+const BOOLEAN_SETTINGS = ['blockTrackers', 'blockAds', 'blockPopups', 'blockAddonTrackers', 'blockThirdPartyCookies', 'stripTrackingParams', 'sendDoNotTrack', 'autoUpdateBlocklist', 'clearCacheOnExit', 'safeBrowsing', 'googleSafeBrowsing', 'spellcheck', 'crashReports'];
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'heobs', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -923,7 +929,38 @@ async function clearAllCookies() {
   await ses.cookies.flushStore();
 }
 
+const CRASH_DUMP_MAX_AGE = 30 * 24 * 3600 * 1000;
+const CRASH_DUMP_MAX_COUNT = 20;
+
+/** Removes files HEoBS no longer needs. Runs at start-up. */
+function tidyUp() {
+  const userData = app.getPath('userData');
+  // half-written files from an interrupted save
+  for (const name of ['vault.json.tmp']) { try { fs.unlinkSync(path.join(userData, name)); } catch { /* none */ } }
+  // crash dumps: keep the newest few, and none older than a month
+  const dumps = listCrashDumps()
+    .map((file) => { try { return { file, time: fs.statSync(file).mtimeMs }; } catch { return null; } })
+    .filter(Boolean)
+    .sort((a, b) => b.time - a.time);
+  dumps.forEach((d, i) => {
+    if (i >= CRASH_DUMP_MAX_COUNT || Date.now() - d.time > CRASH_DUMP_MAX_AGE) { try { fs.unlinkSync(d.file); } catch { /* in use */ } }
+  });
+  // downloaded Google lists are useless without a key
+  if (!gsbKey()) {
+    for (const name of fs.readdirSync(userData)) {
+      if (/^gsb-.*\.(bin|json)$/.test(name)) { try { fs.unlinkSync(path.join(userData, name)); } catch { /* in use */ } }
+    }
+  }
+}
+
+async function clearWebCache() {
+  const ses = session.defaultSession;
+  await ses.clearCache();
+  await ses.clearCodeCaches({}).catch(() => {});
+}
+
 function setupAutoClear() {
+  try { tidyUp(); } catch (err) { console.error('Tidy-up failed:', err && err.message); }
   const ses = session.defaultSession;
   // Remember when each cookie first appeared; the cookie store itself does not say.
   ses.cookies.on('changed', (_e, cookie, cause, removed) => {
@@ -1158,6 +1195,10 @@ const internalHandlers = {
     return name;
   },
   'trusted.remove': (_e, name) => setTrusted(String(name), false),
+
+  // ---- storage used by cached web files
+  'storage.usage': async () => ({ cacheBytes: await session.defaultSession.getCacheSize(), limitMB: CACHE_LIMIT_MB }),
+  'storage.clearCache': async () => { await clearWebCache(); return session.defaultSession.getCacheSize(); },
 
   // ---- auto-clear
   'autoclear.get': () => ({ history: settings.data.historyKeepMs, cookies: settings.data.cookiesKeepMs }),
@@ -1628,16 +1669,21 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  let cookiesClearedForQuit = false;
+  let exitCleanupDone = false;
   app.on('before-quit', (e) => {
     if (history && settings.data.historyKeepMs === -1) history.data = [];
     settings?.flush(); bookmarks?.flush(); history?.flush(); cookieTimes?.flush(); siteIcons?.flush();
-    // "Clear cookies when HEoBS closes": hold the exit until they are gone.
-    if (cookieTimes && settings.data.cookiesKeepMs === -1 && !cookiesClearedForQuit) {
-      cookiesClearedForQuit = true;
-      e.preventDefault();
-      clearAllCookies().catch(() => {}).finally(() => { cookieTimes.flush(); app.quit(); });
-    }
+    if (exitCleanupDone || !cookieTimes) return;
+    // "Clear ... when HEoBS closes": hold the exit until the clearing is finished.
+    const jobs = [];
+    if (settings.data.cookiesKeepMs === -1) jobs.push(clearAllCookies().catch(() => {}));
+    if (settings.data.clearCacheOnExit) jobs.push(clearWebCache().catch(() => {}));
+    if (!jobs.length) return;
+    exitCleanupDone = true;
+    e.preventDefault();
+    const finish = () => { cookieTimes.flush(); app.quit(); };
+    // never let a stuck clean-up keep HEoBS from closing
+    Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 8000))]).then(finish, finish);
   });
   app.on('window-all-closed', () => app.quit());
 }

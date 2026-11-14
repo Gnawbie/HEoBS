@@ -78,8 +78,15 @@
       <p class="muted">Have HEoBS tidy up after you automatically. Pick a preset or choose Custom for your own time.</p>
       <div class="label-row"><b>History</b><div id="autoclear-history"></div></div>
       <div class="label-row"><b>Cookies</b><div id="autoclear-cookies"></div></div>
+      <div class="label-row"><b>Cached files</b>
+        <label class="choice compact"><input id="cache-on-exit" type="checkbox"><span>Clear when HEoBS closes</span></label>
+        <button id="cache-clear" type="button">Clear now</button>
+        <span id="cache-usage" class="muted small"></span>
+      </div>
       <p class="muted small">Cookie age is counted from when a site first set the cookie. Clearing cookies signs you
-        out of the sites they belong to. Saved passwords and bookmarks are never auto-cleared.</p>
+        out of the sites they belong to. Saved passwords and bookmarks are never auto-cleared. Cached files are copies
+        of images and scripts kept to load pages faster; HEoBS never keeps more than 100 MB of them, and clearing
+        them only makes the next visit to a site a little slower.</p>
 
       <h3>Trusted sites</h3>
       <p class="muted">For a trusted site HEoBS keeps the cookies that hold your sign-in, through every auto-clear and
