@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <main class="hero">
+    <h1><b>HEoBS</b></h1>
+    <form id="search"><input id="q" type="text" placeholder="Search the web or enter an address" autocomplete="off" spellcheck="false"></form>
+    <div id="bookmarks-section" hidden>
+      <h2>Bookmarks</h2>
+      <div id="bookmarks" class="tiles"></div>
+    </div>
+    <div id="recent-section" hidden>
+      <h2>Recently visited</h2>
+      <div id="recent" class="tiles"></div>
+    </div>
+  </main>
+  <script src="newtab.js"></script>
+</body>
+</html>

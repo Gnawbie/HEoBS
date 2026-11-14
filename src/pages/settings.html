@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+  <title>Settings</title>
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <main class="settings">
+    <h1>Settings</h1>
+    <nav class="toc">
+      <a href="#search">Search engine</a>
+      <a href="#privacy">Trackers</a>
+      <a href="#passwords">Passwords</a>
+      <a href="#import">Import</a>
+      <a href="#addons">Add-ons</a>
+      <a href="#crash">Crash Reports</a>
+      <a href="#upfront">Upfront</a>
+    </nav>
+
+    <section id="search">
+      <h2>Search engine</h2>
+      <p class="muted">Used when what you type in the address bar is not a web address.</p>
+      <div id="engines" class="choices"></div>
+      <form id="custom-form" class="inline">
+        <input id="custom-url" type="text" placeholder="https://example.com/search?q=%s" spellcheck="false" autocomplete="off">
+        <button>Use custom</button>
+      </form>
+      <p class="muted small">For your own engine, put <code>%s</code> where the search words go.</p>
+      <p id="search-msg" class="msg"></p>
+    </section>
+
+    <section id="privacy">
+      <h2>Trackers</h2>
+      <p class="muted">Trackers are blocked automatically. Each switch below is yours to turn off.</p>
+      <div id="toggles"></div>
+      <p id="privacy-stats" class="muted small"></p>
+      <div id="top-blocked"></div>
+    </section>
+
+    <section id="passwords">
+      <h2>Passwords</h2>
+      <p id="vault-summary" class="muted"></p>
+      <a class="button" href="heobs://passwords/">Manage passwords and lock method</a>
+    </section>
+
+    <section id="import">
+      <h2>Import from another browser</h2>
+      <h3>Bookmarks and bookmarks bar</h3>
+      <div id="browsers"></div>
+      <p><button id="import-html">Import from a bookmarks file (.html)…</button>
+        <span class="muted small">For Firefox, Safari or any browser: use its “Export bookmarks” option.</span></p>
+      <h3>Passwords</h3>
+      <p><button id="import-csv">Import from a password export (.csv)…</button></p>
+      <p class="muted small">Other browsers lock their password stores so only they can read them, so the supported
+        route is their own export: in Chrome, Edge or Brave open Settings → Passwords → Export passwords; in Firefox
+        open Passwords → ⋯ → Export passwords. The export file is <b>not encrypted</b> — delete it once it is imported.</p>
+      <p id="import-msg" class="msg"></p>
+    </section>
+
+    <section id="addons">
+      <h2>Add-ons</h2>
+      <p class="muted">HEoBS can run unpacked Chromium extensions. Every add-on must show what it tracks before it
+        can be installed, and you can switch any add-on — or just its trackers — off at any time.</p>
+      <p><button id="addon-pick">Add an add-on from a folder…</button></p>
+      <div id="addon-review" class="card" hidden></div>
+      <div id="addon-list"></div>
+      <p class="muted small">Limits: add-ons are loaded from a folder (there is no store), and Chromium extension
+        features such as toolbar buttons and some browser APIs are not available, so not every extension will work.
+        Requests made by an add-on's scripts inside a web page count as that page's requests and are covered by the
+        normal tracker blocking.</p>
+      <p id="addon-msg" class="msg"></p>
+    </section>
+
+    <section id="crash">
+      <h2>Crash Reports</h2>
+      <p class="muted">When HEoBS or a tab crashes, a report is saved on this PC so the problem can be diagnosed.
+        Reports are never uploaded. A crash dump can contain parts of the pages that were open, so only share one
+        with someone you trust.</p>
+      <label class="choice"><input id="crash-toggle" type="checkbox">
+        <span><b>Save crash reports on this PC</b><small class="muted">Takes effect the next time HEoBS starts.</small></span></label>
+      <p id="crash-status" class="muted small"></p>
+      <p><button id="crash-open">Open crash folder</button> <button id="crash-clear">Delete all crash reports</button></p>
+      <div id="crash-log"></div>
+    </section>
+
+    <section id="upfront">
+      <h2>Upfront</h2>
+      <p class="muted">Everything HEoBS itself connects to, and why. No surprises.</p>
+      <h3>Trackers built into HEoBS</h3>
+      <p id="upfront-builtin"></p>
+      <h3>Connections HEoBS makes</h3>
+      <div id="upfront-connections"></div>
+      <h3>Things HEoBS does not do</h3>
+      <ul id="upfront-absent"></ul>
+      <p id="upfront-engine" class="muted small"></p>
+      <p id="versions" class="muted small"></p>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

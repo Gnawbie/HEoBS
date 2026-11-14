@@ -1,0 +1,4 @@
+node_modules/
+
+# Password / data exports must never be committed
+*.csv
