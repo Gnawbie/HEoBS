@@ -8,11 +8,16 @@ const { pathToFileURL } = require('node:url');
 
 const { Vault } = require('./vault');
 const hello = require('./hello');
-const { Privacy, hostOf, LIST_HOST } = require('./privacy');
+const { Privacy, hostOf, site, LIST_HOST } = require('./privacy');
 const { Addons } = require('./addons');
+const { AdBlock, LIST_HOST: AD_LIST_HOST } = require('./adblock');
+const { SafeBrowsing, API_HOST: GSB_HOST } = require('./gsb');
 const importer = require('./importer');
 
 app.setName('HEoBS');
+
+const errorLog = require('./errorlog');
+errorLog.init();
 
 const NEWTAB = 'heobs://newtab/';
 const HISTORY_URL = 'heobs://history/';
@@ -34,20 +39,36 @@ const ENGINES = [
 const DEFAULT_SETTINGS = {
   searchUrl: ENGINES[0].url,
   blockTrackers: true,
+  blockAds: true,
+  blockPopups: true,
+  // Per-site exceptions, as site names such as "example.com"
+  shieldsOffSites: [],
+  popupAllowedSites: [],
   blockAddonTrackers: true,
   blockThirdPartyCookies: true,
   stripTrackingParams: true,
   sendDoNotTrack: true,
   autoUpdateBlocklist: true,
   safeBrowsing: true,
+  // Google Safe Browsing: only does anything once the user has saved their own API key.
+  googleSafeBrowsing: true,
+  gsbKey: '', // the key, encrypted by Windows for this user account
+  welcomeSeen: false, // the one-time welcome box on the start page
   spellcheck: true,
   crashReports: true,
+  // Auto-clear: 0 = keep, -1 = clear when HEoBS closes, otherwise maximum age in milliseconds.
+  historyKeepMs: 0,
+  cookiesKeepMs: 0,
+  // Sites whose sign-in cookies survive every kind of clearing. Nothing else about them is kept.
+  trustedSites: [],
+  // Start-page shortcuts chosen by the user: [{ title, url }]
+  shortcuts: [],
   addons: [],
 };
-const BOOLEAN_SETTINGS = ['blockTrackers', 'blockAddonTrackers', 'blockThirdPartyCookies', 'stripTrackingParams', 'sendDoNotTrack', 'autoUpdateBlocklist', 'safeBrowsing', 'spellcheck', 'crashReports'];
+const BOOLEAN_SETTINGS = ['blockTrackers', 'blockAds', 'blockPopups', 'blockAddonTrackers', 'blockThirdPartyCookies', 'stripTrackingParams', 'sendDoNotTrack', 'autoUpdateBlocklist', 'safeBrowsing', 'googleSafeBrowsing', 'spellcheck', 'crashReports'];
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'heobs', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: 'heobs', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 
 // ---------------------------------------------------------------- storage
@@ -75,6 +96,8 @@ let history;     // [{ url, title, time }] newest first
 let lastSession; // { urls: [] }
 let vault;
 let privacy;
+let adblock;
+let gsb;
 let addons;
 
 // ---------------------------------------------------------------- helpers
@@ -196,8 +219,9 @@ class BrowserWin {
       height: 820,
       minWidth: 560,
       minHeight: 320,
-      title: 'HEoBS',
+      title: errorLog.enabled ? 'HEoBS (test build)' : 'HEoBS',
       backgroundColor: '#1b1d23',
+      icon: path.join(PAGES_DIR, 'icon.png'),
       titleBarStyle: 'hidden',
       titleBarOverlay: { color: '#1b1d23', symbolColor: '#c9ccd3', height: 40 },
       webPreferences: {
@@ -263,7 +287,7 @@ class BrowserWin {
     });
     view.setBackgroundColor('#ffffff');
     view.webContents.setWebRTCIPHandlingPolicy('default_public_interface_only');
-    const tab = { id: nextTabId++, view, favicon: null, fullscreen: false, blank: false, peek: null, blocked: new Map(), userHint: null };
+    const tab = { id: nextTabId++, view, favicon: null, fullscreen: false, blank: false, peek: null, blocked: new Map(), userHint: null, lastInput: 0, lastPopupInput: -1, popups: [] };
 
     const current = this.active;
     if (!url && current) {
@@ -296,11 +320,18 @@ class BrowserWin {
       if (entry && entry.title !== title) { entry.title = title; history.save(); }
       update();
     });
-    wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || null; update(); });
-    wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) { tab.favicon = null; tab.blocked = new Map(); }
+    wc.on('page-favicon-updated', (_e, icons) => {
+      tab.favicon = icons[0] || null;
+      update();
+      const host = hostOf(wc.getURL());
+      if (icons[0] && host && !siteIcons.data[host] && isShortcutHost(host)) {
+        fetchIconAsData(icons[0]).then((icon) => { if (icon) { siteIcons.data[host] = icon; siteIcons.save(); } }).catch(() => {});
+      }
     });
-    wc.on('did-navigate', (_e, url) => { this.recordVisit(wc, url); update(); });
+    wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) { tab.favicon = null; tab.blocked = new Map(); tab.popups = []; }
+    });
+    wc.on('did-navigate', (_e, url) => { this.recordVisit(wc, url); pruneHistory(); update(); });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (isMainFrame) { this.recordVisit(wc, url); update(); }
     });
@@ -310,8 +341,19 @@ class BrowserWin {
       wc.loadURL('heobs://error/?' + q).catch(() => {});
     });
 
+    // Remember when the user last clicked or typed in this page: a window the
+    // page opens without that is a pop-up nobody asked for.
+    wc.on('input-event', (_e, input) => {
+      if (['mouseDown', 'mouseUp', 'keyDown', 'rawKeyDown', 'touchStart', 'touchEnd', 'gestureTap'].includes(input.type)) tab.lastInput = Date.now();
+    });
+
     wc.setWindowOpenHandler(({ url, disposition }) => {
-      if (/^(https?|heobs|about):/i.test(url)) {
+      if (!/^(https?|heobs|about):/i.test(url)) return { action: 'deny' };
+      const reason = this.popupBlockReason(tab, url);
+      if (reason) {
+        if (tab.popups.length < 50) tab.popups.push({ url, reason });
+        this.sendState();
+      } else {
         this.newTab(url, { activate: disposition !== 'background-tab', after: tab });
       }
       return { action: 'deny' };
@@ -339,6 +381,19 @@ class BrowserWin {
     else history.data.unshift({ url, title: wc.getTitle() || url, time: Date.now() });
     if (history.data.length > HISTORY_LIMIT) history.data.length = HISTORY_LIMIT;
     history.save();
+  }
+
+  /** Why a window the page wants to open should be blocked, or null to allow it. */
+  popupBlockReason(tab, url) {
+    if (!settings.data.blockPopups) return null;
+    const opener = toSite(tab.view.webContents.getURL());
+    if (opener && settings.data.popupAllowedSites.includes(opener)) return null;
+    if (Date.now() - tab.lastInput > 1500) return 'opened without a click';
+    if (tab.lastPopupInput === tab.lastInput) return 'more than one window from a single click';
+    const host = hostOf(url);
+    if (host && site(host) !== opener && privacy.isListed(host)) return 'leads to a known ad server';
+    tab.lastPopupInput = tab.lastInput;
+    return null;
   }
 
   /** The tab whose page should be on screen for `tab` (its own, or the one it peeks at). */
@@ -567,8 +622,8 @@ class BrowserWin {
         bookmarked: !!url && allBookmarks().some((b) => b.url === url),
         bookmarks: bookmarks.data.bar.map((n) => ({ title: n.title, url: n.url, favicon: n.favicon, folder: !!n.children })),
         hasOtherBookmarks: bookmarks.data.other.length > 0,
-        blocked: [...blocked.values()].reduce((a, b) => a + b, 0),
-        shieldOn: settings.data.blockTrackers,
+        blocked: [...blocked.values()].reduce((a, b) => a + b, 0) + (active && !active.blank ? active.popups.length : 0),
+        shieldOn: (settings.data.blockTrackers || settings.data.blockAds) && !settings.data.shieldsOffSites.includes(toSite(url)),
         vaultLocked: vault.locked,
       });
     });
@@ -580,13 +635,53 @@ class BrowserWin {
     const tab = this.active;
     const hosts = tab && !tab.blank ? [...tab.blocked].sort((a, b) => b[1] - a[1]) : [];
     const total = hosts.reduce((a, [, n]) => a + n, 0);
-    const head = !settings.data.blockTrackers
-      ? 'Tracker blocking is turned off'
-      : total ? `${total} tracker request${total === 1 ? '' : 's'} blocked on this page` : 'No trackers blocked on this page';
+    const here = toSite(this.nav?.getURL());
+    const off = !!here && settings.data.shieldsOffSites.includes(here);
+    const anyOn = settings.data.blockTrackers || settings.data.blockAds;
+    const head = off ? `Blocking is switched off for ${here}`
+      : !anyOn ? 'Ad and tracker blocking is turned off'
+        : total ? `${total} ad / tracker request${total === 1 ? '' : 's'} blocked on this page` : 'No ads or trackers blocked on this page';
+    const popups = tab && !tab.blank ? tab.popups : [];
+    const toggleSite = (key, name, on) => {
+      const list = new Set(settings.data[key]);
+      if (on) list.add(name); else list.delete(name);
+      settings.data[key] = [...list].sort();
+      settings.save();
+      broadcastState();
+    };
     Menu.buildFromTemplate([
       { label: head, enabled: false },
-      ...hosts.slice(0, 20).map(([h, n]) => ({ label: menuLabel(`${h}  ×${n}`), enabled: false })),
+      ...hosts.slice(0, 15).map(([h, n]) => ({ label: menuLabel(`${h}  ×${n}`), enabled: false })),
+      ...(popups.length ? [
+        { type: 'separator' },
+        { label: `${popups.length} pop-up${popups.length === 1 ? '' : 's'} blocked on this page`, enabled: false },
+        ...popups.slice(0, 6).map((p) => ({ label: menuLabel(`Open anyway: ${hostOf(p.url) || p.url} (${p.reason})`), click: () => this.newTab(p.url, { after: tab }) })),
+      ] : []),
       { type: 'separator' },
+      ...(here ? [
+        {
+          label: menuLabel(`Block ads and trackers on ${here}`),
+          type: 'checkbox',
+          checked: !off,
+          click: (item) => { toggleSite('shieldsOffSites', here, !item.checked); this.reload(); },
+        },
+        {
+          label: menuLabel(`Allow pop-ups from ${here}`),
+          type: 'checkbox',
+          checked: settings.data.popupAllowedSites.includes(here),
+          click: (item) => toggleSite('popupAllowedSites', here, item.checked),
+        },
+      ] : []),
+      ...(() => {
+        const name = toSite(this.nav?.getURL());
+        if (!name) return [];
+        return [{
+          label: menuLabel(`Trusted site: keep me signed in to ${name}`),
+          type: 'checkbox',
+          checked: settings.data.trustedSites.includes(name),
+          click: (item) => setTrusted(name, item.checked),
+        }];
+      })(),
       { label: 'Privacy settings', click: () => this.openInternal(SETTINGS_URL) },
     ]).popup({ window: this.win });
   }
@@ -660,6 +755,7 @@ class BrowserWin {
       { type: 'separator' },
       k('Developer tools', 'F12', () => this.shown?.view.webContents.toggleDevTools()),
       { label: 'Clear browsing data…', click: () => clearBrowsingData(this) },
+      ...(errorLog.enabled ? [{ label: 'Open error log (test build)', click: () => { fs.appendFileSync(errorLog.logFile, ''); shell.openPath(errorLog.logFile); } }] : []),
       { type: 'separator' },
       { label: 'Exit', click: () => app.quit() },
     ]).popup({ window: this.win });
@@ -677,13 +773,174 @@ async function clearBrowsingData(bw) {
     defaultId: 1,
     cancelId: 1,
     message: 'Clear browsing data?',
-    detail: 'This removes history, cookies, cache and site storage. You will be signed out of websites. Bookmarks and saved passwords are kept.',
+    detail: 'This removes history, cookies, cache and site storage. You will be signed out of websites, except your trusted sites, whose sign-in cookies are kept. Bookmarks and saved passwords are kept.',
   });
   if (response !== 0) return;
   history.data = [];
   history.flush();
-  await session.defaultSession.clearStorageData();
-  await session.defaultSession.clearCache();
+  const ses = session.defaultSession;
+  const keep = (await ses.cookies.get({})).filter(isTrustedCookie);
+  await ses.clearStorageData();
+  await ses.clearCache();
+  for (const c of keep) {
+    await ses.cookies.set({
+      url: cookieUrl(c), name: c.name, value: c.value, path: c.path,
+      domain: c.hostOnly ? undefined : c.domain,
+      secure: c.secure, httpOnly: c.httpOnly, sameSite: c.sameSite, expirationDate: c.expirationDate,
+    }).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------- shortcut icons
+
+// Each shortcut shows its site's own icon. The icon is fetched once, when the
+// shortcut is added (or the first time you visit the site), and kept on this
+// PC, so opening the start page never contacts any of those sites.
+let siteIcons; // { host: "data:image/...;base64,..." }
+const MAX_SHORTCUTS = 20;
+const ICON_DATA = /^data:image\/(png|x-icon|vnd\.microsoft\.icon|jpeg|gif|webp|svg\+xml);base64,/;
+
+async function fetchIconAsData(url) {
+  const res = await net.fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(5000) });
+  if (!res.ok) return null;
+  let type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const body = Buffer.from(await res.arrayBuffer());
+  if (!body.length || body.length > 200 * 1024) return null;
+  if (!type.startsWith('image/')) {
+    if (/\.ico(\?|$)/i.test(url)) type = 'image/x-icon'; else return null;
+  }
+  const data = `data:${type};base64,${body.toString('base64')}`;
+  return ICON_DATA.test(data) ? data : null;
+}
+
+/** Finds a site's own icon: the one its home page declares, else /favicon.ico. */
+async function findSiteIcon(pageUrl) {
+  const origin = new URL(pageUrl).origin;
+  try {
+    const res = await net.fetch(origin + '/', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
+    if (res.ok && (res.headers.get('content-type') || '').includes('html')) {
+      const html = (await res.text()).slice(0, 300000);
+      const tags = [...html.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]).filter((t) => /rel\s*=\s*["']?[^"'>]*icon/i.test(t));
+      tags.sort((a, b) => (/apple-touch/i.test(b) ? 1 : 0) - (/apple-touch/i.test(a) ? 1 : 0)); // larger artwork first
+      for (const tag of tags.slice(0, 4)) {
+        const href = /href\s*=\s*["']?([^"'\s>]+)/i.exec(tag);
+        if (!href) continue;
+        const icon = await fetchIconAsData(new URL(href[1].replace(/&amp;/g, '&'), res.url || origin).toString()).catch(() => null);
+        if (icon) return icon;
+      }
+    }
+  } catch { /* fall through to favicon.ico */ }
+  return fetchIconAsData(origin + '/favicon.ico').catch(() => null);
+}
+
+async function cacheSiteIcon(url) {
+  const host = hostOf(url);
+  if (!host || siteIcons.data[host]) return;
+  const icon = await findSiteIcon(url).catch(() => null);
+  if (icon) { siteIcons.data[host] = icon; siteIcons.save(); }
+}
+
+const isShortcutHost = (host) => settings.data.shortcuts.some((s) => hostOf(s.url) === host);
+
+function dropUnusedIcons() {
+  for (const host of Object.keys(siteIcons.data)) if (!isShortcutHost(host)) delete siteIcons.data[host];
+  siteIcons.save();
+}
+
+// ---------------------------------------------------------------- auto-clear
+
+const MINUTE = 60 * 1000;
+const MAX_KEEP = 3650 * 24 * 60 * MINUTE;
+let cookieTimes; // { "domain|path|name": time the cookie was first set }
+
+const cookieKey = (c) => `${c.domain}|${c.path}|${c.name}`;
+const cookieUrl = (c) => `http${c.secure ? 's' : ''}://${c.domain.replace(/^\./, '')}${c.path}`;
+
+/** True for cookies belonging to a site the user marked as trusted. */
+function isTrustedCookie(c) {
+  return settings.data.trustedSites.includes(site(c.domain.replace(/^\./, '').toLowerCase()));
+}
+
+/** Turns "https://www.example.com/login" or "example.com" into "example.com". */
+function toSite(input) {
+  let text = String(input || '').trim().toLowerCase();
+  if (!text) return '';
+  if (!/^[a-z][a-z0-9+.-]*:\/\//.test(text)) text = 'https://' + text;
+  let host = '';
+  try { const u = new URL(text); if (/^https?:$/.test(u.protocol)) host = u.hostname; } catch { /* not an address */ }
+  return host && (host.includes('.') || host === 'localhost') ? site(host) : '';
+}
+
+function setTrusted(name, on) {
+  const list = new Set(settings.data.trustedSites);
+  if (on) list.add(name); else list.delete(name);
+  settings.data.trustedSites = [...list].sort();
+  settings.save();
+  if (!on) pruneCookies().catch(() => {});
+}
+
+/** Drops history entries older than the chosen age. */
+function pruneHistory() {
+  const keep = settings.data.historyKeepMs;
+  if (!(keep > 0)) return;
+  const cutoff = Date.now() - keep;
+  const before = history.data.length;
+  history.data = history.data.filter((h) => h.time >= cutoff);
+  if (history.data.length !== before) history.save();
+}
+
+/** Deletes cookies that were first set longer ago than the chosen age. */
+async function pruneCookies() {
+  const keep = settings.data.cookiesKeepMs;
+  if (!(keep > 0)) return;
+  const ses = session.defaultSession;
+  const cutoff = Date.now() - keep;
+  const live = new Set();
+  for (const c of await ses.cookies.get({})) {
+    const key = cookieKey(c);
+    const first = cookieTimes.data[key] ?? (cookieTimes.data[key] = Date.now());
+    if (first < cutoff && !isTrustedCookie(c)) await ses.cookies.remove(cookieUrl(c), c.name).catch(() => {});
+    else live.add(key);
+  }
+  for (const key of Object.keys(cookieTimes.data)) if (!live.has(key)) delete cookieTimes.data[key];
+  cookieTimes.save();
+}
+
+/** Removes every cookie except those of trusted sites. */
+async function clearAllCookies() {
+  const ses = session.defaultSession;
+  if (!settings.data.trustedSites.length) {
+    cookieTimes.data = {};
+    cookieTimes.save();
+    return ses.clearStorageData({ storages: ['cookies'] });
+  }
+  for (const c of await ses.cookies.get({})) {
+    if (isTrustedCookie(c)) continue;
+    await ses.cookies.remove(cookieUrl(c), c.name).catch(() => {});
+    delete cookieTimes.data[cookieKey(c)];
+  }
+  cookieTimes.save();
+  await ses.cookies.flushStore();
+}
+
+function setupAutoClear() {
+  const ses = session.defaultSession;
+  // Remember when each cookie first appeared; the cookie store itself does not say.
+  ses.cookies.on('changed', (_e, cookie, cause, removed) => {
+    const key = cookieKey(cookie);
+    if (removed) {
+      if (cause === 'overwrite') return; // the site refreshed it: keep the original date
+      delete cookieTimes.data[key];
+    } else if (!cookieTimes.data[key]) cookieTimes.data[key] = Date.now();
+    else return;
+    cookieTimes.save();
+  });
+  // "When HEoBS closes" is also enforced at start-up, in case the last exit was a crash.
+  if (settings.data.historyKeepMs === -1) { history.data = []; history.flush(); }
+  if (settings.data.cookiesKeepMs === -1) clearAllCookies();
+  const sweep = () => { pruneHistory(); pruneCookies().catch(() => {}); };
+  sweep();
+  setInterval(sweep, 5 * MINUTE);
 }
 
 // ---------------------------------------------------------------- crash reports
@@ -764,25 +1021,37 @@ function upfrontReport() {
         who: LIST_HOST,
         why: 'Tracker blocklist update, at most once a week. A plain download with no cookies or identifiers; that server can see your IP address and that the request came from HEoBS.',
         note: s.autoUpdateBlocklist ? 'Currently ON.' : 'Currently OFF — the built-in list is used and never refreshed.',
-        control: 'Toggle "Update the tracker blocklist weekly" under Trackers.',
+        control: 'Toggle "Update the tracker blocklist weekly" under Ads & trackers.',
+      },
+      {
+        who: AD_LIST_HOST,
+        why: 'Ad blocking. When HEoBS starts and its ad filter lists are more than 4 days old, it downloads fresh ones (EasyList, EasyPrivacy and uBlock Origin lists, mirrored by the Ghostery project on GitHub). Plain downloads with no cookies or identifiers; GitHub can see your IP address, never the sites you visit. Filtering itself happens on this PC.',
+        note: s.blockAds ? (privacy.stats().adEngineReady ? 'Currently ON.' : 'Currently ON — lists not loaded yet (first start or offline).') : 'Currently OFF — nothing is downloaded.',
+        control: 'Toggle "Block ads" under Ads & trackers.',
       },
       {
         who: privacy.stats().threatHosts.join(', '),
         why: 'Safe browsing. Once a day HEoBS downloads lists of known phishing and malware sites and checks every address against them on this PC. Plain downloads with no cookies or identifiers; those servers can see your IP address, but never which sites you visit.',
         note: s.safeBrowsing ? `Currently ON — ${privacy.stats().threatSize.toLocaleString()} dangerous sites known.` : 'Currently OFF — no lists are downloaded and nothing is checked.',
-        control: 'Toggle "Warn me about dangerous sites" under Trackers.',
+        control: 'Toggle "Warn me about dangerous sites" under Ads & trackers.',
+      },
+      {
+        who: GSB_HOST,
+        why: 'Google Safe Browsing (optional). Only if you saved your own Google API key: HEoBS downloads Google\'s lists of 4-byte fingerprints of dangerous addresses about every 30 minutes and checks addresses against them on this PC. Only when a fingerprint matches does it ask Google to confirm, sending that 4-byte fingerprint and never the address. Google sees your IP address, your API key, and those occasional fingerprints.',
+        note: !gsb.status().hasKey ? 'Currently OFF — no key saved, so nothing is sent to Google.' : (s.safeBrowsing && s.googleSafeBrowsing ? 'Currently ON.' : 'Currently OFF — switched off.'),
+        control: 'Ads & trackers: "Also check sites with Google Safe Browsing", or remove the key.',
       },
       {
         who: 'Google dictionary servers (redirector.gvt1.com / dl.google.com)',
         why: 'Spell-check. The first time spell-check needs a language, the Chromium engine downloads that dictionary file from Google. What you type is checked on this PC and is never sent. Google can see your IP address and which language was fetched.',
         note: s.spellcheck ? 'Currently ON.' : 'Currently OFF — no dictionary is downloaded.',
-        control: 'Toggle "Check spelling as I type" under Trackers.',
+        control: 'Toggle "Check spelling as I type" under Ads & trackers.',
       },
       {
         who: 'Websites you open',
-        why: 'Pages you visit, plus their icons for the tab strip and bookmarks bar. Sites can still do their own first-party analytics; HEoBS blocks known third-party trackers, third-party cookies and tracking link parameters, but no blocker catches everything.',
+        why: 'Pages you visit, plus their icons for the tab strip and bookmarks bar. When you add or import a start-page shortcut, HEoBS fetches that site\'s icon once (no cookies sent) and keeps it on this PC; opening the start page afterwards contacts nobody. Sites can still do their own first-party analytics; HEoBS blocks known third-party trackers, third-party cookies and tracking link parameters, but no blocker catches everything.',
         note: '',
-        control: 'Trackers toggles above. The shield in the toolbar shows what was blocked on each page.',
+        control: 'Ads & trackers toggles above. The shield in the toolbar shows what was blocked on each page.',
       },
       {
         who: 'Add-ons you install',
@@ -814,6 +1083,11 @@ function vaultStatus() {
 
 let clipboardTimer = null;
 
+// Newer Electron versions return the clipboard text as a promise, older ones as a string.
+async function readClipboardText() {
+  try { return String((await clipboard.readText()) || ''); } catch { return ''; }
+}
+
 const internalHandlers = {
   history: () => history.data,
   bookmarks: () => allBookmarks(),
@@ -823,6 +1097,80 @@ const internalHandlers = {
     history.save();
   },
   clearHistory: () => { history.data = []; history.save(); },
+
+  // ---- start-page shortcuts
+  'shortcuts.list': () => settings.data.shortcuts.map((s) => ({ ...s, icon: siteIcons.data[hostOf(s.url)] || null })),
+  'shortcuts.save': async (_e, index, title, address) => {
+    let text = String(address || '').trim();
+    if (text && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = 'https://' + text;
+    let url = '';
+    try { const u = new URL(text); if (/^https?:$/.test(u.protocol) && (u.hostname.includes('.') || u.hostname === 'localhost')) url = u.toString(); } catch { /* invalid */ }
+    if (!url) throw new Error('Enter a web address such as example.com.');
+    const name = String(title || '').trim().slice(0, 60) || hostOf(url).replace(/^www\./, '');
+    const list = settings.data.shortcuts;
+    if (Number.isInteger(index) && index >= 0 && index < list.length) list[index] = { title: name, url };
+    else if (list.length >= MAX_SHORTCUTS) throw new Error('You can have up to 20 shortcuts. Remove one first.');
+    else list.push({ title: name, url });
+    settings.save();
+    await cacheSiteIcon(url);
+    dropUnusedIcons();
+  },
+  'shortcuts.remove': (_e, index) => {
+    const list = settings.data.shortcuts;
+    if (Number.isInteger(index) && index >= 0 && index < list.length) { list.splice(index, 1); settings.save(); dropUnusedIcons(); }
+  },
+  // Shortcuts set up on another browser's start page
+  'shortcuts.sources': () => importer.detectShortcuts().map(({ list, ...rest }) => rest),
+  'shortcuts.import': async (_e, id) => {
+    const src = importer.detectShortcuts().find((s) => s.id === id);
+    if (!src) throw new Error('That browser profile was not found.');
+    const list = settings.data.shortcuts;
+    const added = [];
+    let skipped = 0;
+    for (const item of src.list) {
+      let url = '';
+      try { const u = new URL(item.url); if (/^https?:$/.test(u.protocol)) url = u.toString(); } catch { /* skip */ }
+      if (!url || list.some((s) => s.url === url) || list.length >= MAX_SHORTCUTS) { skipped++; continue; }
+      const entry = { title: item.title.trim().slice(0, 60) || hostOf(url).replace(/^www\./, ''), url };
+      list.push(entry);
+      added.push(entry);
+    }
+    settings.save();
+    await Promise.all(added.map((s) => cacheSiteIcon(s.url)));
+    return { added: added.length, skipped };
+  },
+
+  // ---- per-site exceptions (blocking off / pop-ups allowed)
+  'sites.list': (_e, key) => (['shieldsOffSites', 'popupAllowedSites'].includes(key) ? settings.data[key] : []),
+  'sites.remove': (_e, key, name) => {
+    if (!['shieldsOffSites', 'popupAllowedSites'].includes(key)) return;
+    settings.data[key] = settings.data[key].filter((s) => s !== name);
+    settings.save();
+    broadcastState();
+  },
+
+  // ---- trusted sites
+  'trusted.list': () => settings.data.trustedSites,
+  'trusted.add': (_e, input) => {
+    const name = toSite(input);
+    if (!name) throw new Error('Enter a site such as example.com.');
+    setTrusted(name, true);
+    return name;
+  },
+  'trusted.remove': (_e, name) => setTrusted(String(name), false),
+
+  // ---- auto-clear
+  'autoclear.get': () => ({ history: settings.data.historyKeepMs, cookies: settings.data.cookiesKeepMs }),
+  'autoclear.set': async (_e, kind, ms) => {
+    if (!['history', 'cookies'].includes(kind)) throw new Error('Unknown auto-clear type');
+    const value = Number(ms);
+    if (!(value === 0 || value === -1 || (Number.isFinite(value) && value >= MINUTE && value <= MAX_KEEP))) {
+      throw new Error('Choose a time of at least 1 minute.');
+    }
+    settings.data[kind + 'KeepMs'] = Math.round(value);
+    settings.save();
+    if (kind === 'history') pruneHistory(); else await pruneCookies();
+  },
 
   // ---- settings
   'settings.get': async () => ({
@@ -838,6 +1186,8 @@ const internalHandlers = {
       settings.data[key] = !!value;
       if (key === 'spellcheck') session.defaultSession.setSpellCheckerEnabled(!!value);
       if (key === 'safeBrowsing' && value) privacy.maybeUpdateThreats();
+      if ((key === 'safeBrowsing' || key === 'googleSafeBrowsing') && value) gsb.update().catch(() => {});
+      if (key === 'blockAds' && value) startAdblock(session.defaultSession);
     }
     else if (key === 'searchUrl') {
       const v = String(value || '').trim();
@@ -848,6 +1198,26 @@ const internalHandlers = {
     } else throw new Error('Unknown setting');
     settings.save();
     broadcastState();
+  },
+
+  // ---- one-time welcome box (start page)
+  'welcome.state': () => ({ show: !settings.data.welcomeSeen && !gsbKey() }),
+  'welcome.done': () => { settings.data.welcomeSeen = true; settings.save(); },
+
+  // ---- Google Safe Browsing (the key itself is never returned)
+  'gsb.status': () => gsb.status(),
+  'gsb.setKey': (_e, key) => saveGsbKey(key),
+  // "Paste key": the main process reads the clipboard itself, only when this is clicked.
+  'gsb.pasteKey': async () => {
+    const text = (await readClipboardText()).trim();
+    if (!text) throw new Error('The clipboard is empty. Copy the key from Google first.');
+    return saveGsbKey(text);
+  },
+  'gsb.removeKey': () => {
+    settings.data.gsbKey = '';
+    gsbKeyCache = null;
+    settings.flush();
+    gsb.reset();
   },
 
   // ---- safe browsing warning page
@@ -956,7 +1326,7 @@ const internalHandlers = {
     if (!secret) return false;
     clipboard.writeText(secret);
     clearTimeout(clipboardTimer);
-    clipboardTimer = setTimeout(() => { if (clipboard.readText() === secret) clipboard.clear(); }, 30000);
+    clipboardTimer = setTimeout(async () => { if ((await readClipboardText()) === secret) clipboard.clear(); }, 30000);
     return true;
   },
   'vault.remove': (_e, id) => { if (!vault.locked) vault.remove(String(id)); },
@@ -1005,11 +1375,68 @@ function registerIpc() {
 
 // ---------------------------------------------------------------- session
 
+async function saveGsbKey(key) {
+  const value = String(key || '').trim();
+  if (!/^[A-Za-z0-9_-]{20,120}$/.test(value)) throw new Error('That does not look like a Google API key. It is a single run of letters, digits, - and _, usually starting with "AIza".');
+  gsb.reset();
+  settings.data.gsbKey = safeStorage.encryptString(value).toString('base64');
+  gsbKeyCache = value;
+  settings.flush();
+  await gsb.update();
+  const st = gsb.status();
+  if (st.error) throw new Error('The key was saved, but Google refused it: ' + st.error);
+  return st;
+}
+
+// The Google API key is kept encrypted (Windows seals it to this user account)
+// and is never handed to any page, HEoBS's own settings page included.
+let gsbKeyCache;
+function gsbKey() {
+  if (gsbKeyCache !== undefined) return gsbKeyCache;
+  gsbKeyCache = null;
+  try { if (settings.data.gsbKey) gsbKeyCache = safeStorage.decryptString(Buffer.from(settings.data.gsbKey, 'base64')); } catch { /* unreadable: treat as no key */ }
+  return gsbKeyCache;
+}
+
+// Stand-ins for blocked ad scripts are served from heobs://standin/<n>.
+// (Chromium refuses to redirect a request straight to inline "data:" content.)
+const standInIds = new Map(); // engine-provided data: URL -> index
+const standInBodies = [];     // index -> { type, body }
+function standInUrl(dataUrl) {
+  let id = standInIds.get(dataUrl);
+  if (id === undefined) {
+    const m = /^data:([^,;]*)[^,]*?(;base64)?,([\s\S]*)$/.exec(dataUrl);
+    if (!m) return dataUrl;
+    let body;
+    try { body = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])); } catch { return dataUrl; }
+    id = standInBodies.length;
+    standInBodies.push({ type: m[1] || 'text/plain', body });
+    standInIds.set(dataUrl, id);
+  }
+  return `heobs://standin/${id}`;
+}
+
+let adblockStarting = false;
+function startAdblock(ses) {
+  if (adblockStarting) return;
+  adblockStarting = true;
+  adblock.load().then(() => {
+    adblock.enable(ses);
+    privacy.adblock = adblock;
+    privacy.attach(ses); // re-install HEoBS's combined request handler on top of the engine's
+  }).catch((err) => { adblockStarting = false; console.error('Ad filter lists could not be loaded:', err && err.message); });
+}
+
 function setupSession() {
   const ses = session.defaultSession;
 
   protocol.handle('heobs', (req) => {
     const u = new URL(req.url);
+    if (u.hostname === 'standin') {
+      const item = standInBodies[Number(u.pathname.slice(1))];
+      if (!item) return new Response('', { status: 404 });
+      return new Response(item.body, { headers: { 'content-type': item.type, 'access-control-allow-origin': '*', 'cache-control': 'no-store' } });
+    }
     const pages = { newtab: 'newtab.html', history: 'history.html', error: 'error.html', blocked: 'blocked.html', settings: 'settings.html', passwords: 'passwords.html' };
     const name = u.pathname === '/' ? pages[u.hostname] : path.basename(u.pathname);
     const file = name && path.join(PAGES_DIR, name);
@@ -1029,9 +1456,10 @@ function setupSession() {
       found.bw.sendState();
     },
     onExtensionRequest: (extensionId, host) => addons.record(extensionId, host),
-    onDangerous: (wc, url, kind) => {
+    standIn: standInUrl,
+    onDangerous: (wc, url, kind, source) => {
       if (!wc || wc.isDestroyed() || !tabFor(wc)) return;
-      const q = new URLSearchParams({ url, kind });
+      const q = new URLSearchParams({ url, kind, source: source || 'local' });
       setImmediate(() => { if (!wc.isDestroyed()) wc.loadURL('heobs://blocked/?' + q).catch(() => {}); });
     },
   });
@@ -1041,6 +1469,22 @@ function setupSession() {
   addons = new Addons({ ses, settings, isTracker: (h) => privacy.isListed(h) });
   privacy.attach(ses);
   setTimeout(() => privacy.maybeUpdate(), 30000);
+
+  gsb = new SafeBrowsing({
+    userData: app.getPath('userData'),
+    getKey: gsbKey,
+    fetch: (url, init) => net.fetch(url, init),
+    isEnabled: () => settings.data.safeBrowsing && settings.data.googleSafeBrowsing,
+  });
+  privacy.gsb = gsb;
+  setTimeout(() => gsb.update().catch(() => {}), 8000);
+
+  adblock = new AdBlock({
+    userData: app.getPath('userData'),
+    fetch: (url, init) => net.fetch(url, init),
+    isActiveFor: (pageUrl) => settings.data.blockAds && !settings.data.shieldsOffSites.includes(toSite(pageUrl)),
+  });
+  if (settings.data.blockAds) startAdblock(ses);
   addons.loadSaved();
 
   const decided = new Map();
@@ -1140,6 +1584,8 @@ if (settings.data.crashReports) {
 }
 
 if (!app.requestSingleInstanceLock()) {
+  // Another HEoBS already owns this profile, so this copy would hand over to it and log nothing.
+  if (errorLog.enabled) dialog.showErrorBox('HEoBS test build', 'HEoBS is already running. Close it first, then start HEoBS_Test.exe again so errors can be logged.');
   app.quit();
 } else {
   app.on('second-instance', () => new BrowserWin());
@@ -1165,12 +1611,33 @@ if (!app.requestSingleInstanceLock()) {
     vault = new Vault(path.join(app.getPath('userData'), 'vault.json'), safeStorage);
     vault.init();
 
+    cookieTimes = new Store('cookie-times.json', {});
+    siteIcons = new Store('site-icons.json', {});
+
     registerIpc();
     setupSession();
+    setupAutoClear();
     setupMenu();
-    new BrowserWin(lastSession.data.urls);
+    const first = new BrowserWin(lastSession.data.urls);
+    // First start after installing or updating to this version: make sure the
+    // start page, which carries the welcome box, is the tab in front.
+    // (Decided from the restored tab list: a tab's own address is still empty this early.)
+    const restored = lastSession.data.urls || [];
+    if (!settings.data.welcomeSeen && !gsbKey() && restored.length && restored[restored.length - 1] !== NEWTAB) {
+      first.newTab(NEWTAB);
+    }
   });
 
-  app.on('before-quit', () => { settings?.flush(); bookmarks?.flush(); history?.flush(); });
+  let cookiesClearedForQuit = false;
+  app.on('before-quit', (e) => {
+    if (history && settings.data.historyKeepMs === -1) history.data = [];
+    settings?.flush(); bookmarks?.flush(); history?.flush(); cookieTimes?.flush(); siteIcons?.flush();
+    // "Clear cookies when HEoBS closes": hold the exit until they are gone.
+    if (cookieTimes && settings.data.cookiesKeepMs === -1 && !cookiesClearedForQuit) {
+      cookiesClearedForQuit = true;
+      e.preventDefault();
+      clearAllCookies().catch(() => {}).finally(() => { cookieTimes.flush(); app.quit(); });
+    }
+  });
   app.on('window-all-closed', () => app.quit());
 }

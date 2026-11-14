@@ -7,9 +7,58 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "postinstall": "node node_modules/electron/install.js"
+    "postinstall": "node node_modules/electron/install.js",
+    "build": "electron-builder --win nsis && node -e \"require('fs').copyFileSync('dist/HEoBS_Setup.exe','HEoBS_Setup.exe')\""
   },
   "devDependencies": {
-    "electron": "^45.3.2"
-  }
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "io.github.gnawbie.heobs",
+    "productName": "HEoBS",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "artifactName": "HEoBS_Setup.exe",
+      "shortcutName": "HEoBS",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
+      "allowToChangeInstallationDirectory": true,
+      "license": "LICENSE.txt"
+    },
+    "extraResources": [
+      {
+        "from": "LICENSE.txt",
+        "to": "LICENSE.txt"
+      }
+    ],
+    "copyright": "Copyright (c) 2026 Gnawbie"
+  },
+  "author": "Gnawbie",
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.20.3"
+  },
+  "license": "SEE LICENSE IN LICENSE.txt"
 }

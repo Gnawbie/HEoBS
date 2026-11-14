@@ -1,0 +1,51 @@
+HEoBS Freeware License
+
+Copyright (c) 2026 Gnawbie. All rights reserved.
+
+HEoBS ("the Software") is freeware. It is free of charge, and it stays the
+property of its author.
+
+1. What you may do
+
+   a. Use the Software, on as many computers as you like, for personal or
+      non-commercial purposes, free of charge.
+   b. Give unmodified copies of the Software to other people, provided the
+      copies are complete, include this license, and are given free of charge.
+
+2. What you may not do
+
+   a. Sell the Software, charge for access to it, or bundle it with anything
+      that is sold, without the author's written permission.
+   b. Distribute modified versions of the Software, or present the Software
+      or any part of it as your own work.
+   c. Remove or alter this license or any copyright notice.
+
+3. Third-party components
+
+   The Software includes components made by others, each under its own
+   license, which continues to apply to that component. These include the
+   Electron framework and the Chromium engine, the Ghostery ad-blocking
+   library, and community filter and block lists (EasyList, EasyPrivacy,
+   uBlock Origin lists, Peter Lowe's list, Phishing Army, URLhaus). Nothing in
+   this license limits rights you have under those licenses.
+
+   Optional features that connect to outside services, such as Google Safe
+   Browsing, are subject to the terms of those services.
+
+4. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. A WEB BROWSER CANNOT
+   GUARANTEE PROTECTION AGAINST EVERY HARMFUL SITE, AD, TRACKER OR FILE.
+
+5. Limitation of liability
+
+   IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF IT.
+
+6. Ending
+
+   This license ends automatically if you break its terms. If it ends, stop
+   using the Software and delete your copies.

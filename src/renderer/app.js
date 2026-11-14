@@ -182,8 +182,8 @@ window.browser.on('state', (next) => {
   shield.classList.toggle('off', !next.shieldOn);
   $('#shieldcount').textContent = next.shieldOn && next.blocked ? String(next.blocked) : '';
   shield.title = !next.shieldOn
-    ? 'Tracker blocking is off'
-    : next.blocked + ' tracker request' + (next.blocked === 1 ? '' : 's') + ' blocked on this page';
+    ? 'Blocking is off here'
+    : next.blocked + ' ad, tracker or pop-up' + (next.blocked === 1 ? '' : 's') + ' blocked on this page';
   keyBtn.classList.toggle('locked', next.vaultLocked);
   keyBtn.title = next.vaultLocked ? 'Passwords (locked)' : 'Passwords';
   if (switched) hidePasswordBar(false);

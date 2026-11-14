@@ -2,23 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:">
   <title>New Tab</title>
   <link rel="stylesheet" href="pages.css">
 </head>
 <body>
   <main class="hero">
+    <img class="logo" src="icon.png" alt="">
     <h1><b>HEoBS</b></h1>
     <form id="search"><input id="q" type="text" placeholder="Search the web or enter an address" autocomplete="off" spellcheck="false"></form>
-    <div id="bookmarks-section" hidden>
-      <h2>Bookmarks</h2>
-      <div id="bookmarks" class="tiles"></div>
-    </div>
-    <div id="recent-section" hidden>
-      <h2>Recently visited</h2>
-      <div id="recent" class="tiles"></div>
-    </div>
+    <div id="shortcuts" class="shortcuts"></div>
+    <p id="import-row" hidden><button id="import-open" type="button" class="linklike">Import shortcuts from another browser</button></p>
   </main>
+
+  <dialog id="welcome" class="wide">
+    <h3>Welcome to HEoBS</h3>
+    <p>HEoBS already blocks ads, trackers, pop-ups and known dangerous sites. Nothing needs setting up for that.</p>
+    <p><b>One optional extra needs you:</b> Google Safe Browsing adds Google's much larger list of dangerous sites.
+      Google only gives the key for it to you personally, so HEoBS cannot set it up on your behalf. It is free and
+      takes about two minutes.</p>
+    <p><a id="welcome-guide" class="button primary" target="_blank" href="heobs://settings/#gsb-setup">Show me the guide</a></p>
+    <label>Already have a key? Enter it here
+      <input id="welcome-key" type="password" autocomplete="off" spellcheck="false" placeholder="Google API key"></label>
+    <p id="welcome-msg" class="msg"></p>
+    <div class="dialog-buttons">
+      <button id="welcome-paste" type="button">Paste from clipboard</button>
+      <button id="welcome-save" type="button" class="primary">Save and test</button>
+      <span class="spacer"></span>
+      <button id="welcome-later" type="button">Not now</button>
+    </div>
+    <p class="muted small">This box is shown once. You can do this any time under Settings → Ads &amp; trackers.</p>
+  </dialog>
+
+  <dialog id="importer">
+    <h3>Import shortcuts</h3>
+    <p class="muted small">Copies the shortcuts you set up on another browser's start page. Each site's icon is fetched once and kept on this PC.</p>
+    <div id="import-sources"></div>
+    <p id="import-msg" class="msg"></p>
+    <div class="dialog-buttons"><span class="spacer"></span><button id="import-close" type="button">Close</button></div>
+  </dialog>
+
+  <dialog id="editor">
+    <form id="editor-form" method="dialog">
+      <h3 id="editor-title">Add shortcut</h3>
+      <label>Name<input id="sc-name" type="text" autocomplete="off" spellcheck="false" maxlength="60"></label>
+      <label>Address<input id="sc-url" type="text" autocomplete="off" spellcheck="false" placeholder="example.com"></label>
+      <p id="editor-msg" class="msg bad"></p>
+      <div class="dialog-buttons">
+        <button id="sc-remove" type="button" hidden>Remove</button>
+        <span class="spacer"></span>
+        <button id="sc-cancel" type="button">Cancel</button>
+        <button id="sc-save" type="submit" class="primary">Done</button>
+      </div>
+    </form>
+  </dialog>
   <script src="newtab.js"></script>
 </body>
 </html>

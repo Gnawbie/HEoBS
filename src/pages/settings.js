@@ -24,11 +24,14 @@ const errorText = (err) => String(err.message || err).replace(/^Error invoking r
 
 const TOGGLES = [
   ['blockTrackers', 'Auto-block trackers from websites', 'Third-party requests from any page to known tracker and ad-server domains are stopped before they leave your PC.'],
+  ['blockAds', 'Block ads', 'Stops ad requests, hides the gaps ads leave, and defuses many "turn off your ad blocker" walls. If a site still misbehaves, switch blocking off for just that site from the shield button.'],
+  ['blockPopups', 'Block pop-ups', 'Stops windows a page opens on its own, extra windows from a single click, and windows leading to ad servers. Blocked pop-ups are listed under the shield button, where you can open one anyway or allow a site.'],
   ['blockAddonTrackers', 'Auto-block trackers from add-ons', 'Every add-on is stopped from reaching known tracker domains. Turn off to decide add-on by add-on instead.'],
   ['blockThirdPartyCookies', 'Block third-party cookies', 'Cookies are neither sent to nor accepted from sites other than the one in the address bar. May break some embedded logins or widgets.'],
   ['stripTrackingParams', 'Strip tracking parameters from links', 'Removes tags such as utm_source, fbclid and gclid when you open a link.'],
   ['sendDoNotTrack', 'Send "Do Not Track" and Global Privacy Control signals', 'Asks sites not to track you or sell your data. Sites are not forced to obey.'],
   ['safeBrowsing', 'Warn me about dangerous sites', 'Checks every address against lists of known phishing and malware sites. The check happens on this PC; the lists are downloaded once a day.'],
+  ['googleSafeBrowsing', 'Also check sites with Google Safe Browsing', 'Much larger, faster-updated lists than the built-in ones. Needs your own free Google key (set up below); does nothing without one.'],
   ['spellcheck', 'Check spelling as I type', 'Checked on this PC. The dictionary for your language is downloaded once from Google\'s servers.'],
   ['autoUpdateBlocklist', 'Update the tracker blocklist weekly', 'Downloads a fresh list from pgl.yoyo.org. Turn off for zero background connections.'],
 ];
@@ -248,5 +251,85 @@ $('addon-pick').addEventListener('click', async () => {
   } catch (err) { say('addon-msg', errorText(err), true); }
 });
 
+async function renderGsb(message, bad) {
+  const st = await call('gsb.status');
+  const total = Object.values(st.lists).reduce((a, b) => a + b, 0);
+  $('gsb-remove').hidden = !st.hasKey;
+  $('gsb-status').textContent = !st.hasKey ? 'No key saved. Google Safe Browsing is not in use.'
+    : !st.enabled ? 'A key is saved, but checking is switched off above.'
+      : total ? `A key is saved and working. ${total.toLocaleString()} dangerous-site fingerprints loaded, last updated ${new Date(st.updated).toLocaleString()}.`
+        : 'A key is saved. Lists have not been downloaded yet.';
+  say('gsb-msg', message || (st.hasKey && st.error ? 'Last problem talking to Google: ' + st.error : ''), bad || (!message && !!st.error));
+}
+
+$('gsb-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('gsb-key');
+  say('gsb-msg', 'Saving the key and downloading Google\'s lists…');
+  try {
+    await call('gsb.setKey', input.value);
+    input.value = '';
+    renderGsb('Key saved and working.');
+  } catch (err) { input.value = ''; renderGsb(errorText(err), true); }
+  render();
+});
+$('gsb-paste').addEventListener('click', async () => {
+  say('gsb-msg', 'Checking the key with Google and downloading its lists…');
+  try {
+    await call('gsb.pasteKey');
+    renderGsb('Key saved and working.');
+  } catch (err) { renderGsb(errorText(err), true); }
+  render();
+});
+$('gsb-remove').addEventListener('click', async () => {
+  if (!confirm('Remove the Google API key and delete the downloaded lists?')) return;
+  await call('gsb.removeKey');
+  renderGsb('Key removed.');
+  render();
+});
+
+async function renderSiteList(key, boxId, empty) {
+  const list = await call('sites.list', key);
+  const box = $(boxId);
+  box.textContent = '';
+  if (!list.length) { box.append(el('p', { class: 'muted small' }, empty)); return; }
+  for (const name of list) {
+    box.append(el('div', { class: 'row-card' },
+      el('span', {}, el('b', {}, name)),
+      el('button', { onclick: async () => { await call('sites.remove', key, name); renderExceptions(); } }, 'Remove')));
+  }
+}
+function renderExceptions() {
+  renderSiteList('shieldsOffSites', 'sites-off', 'None. Blocking is on everywhere.');
+  renderSiteList('popupAllowedSites', 'sites-popups', 'None.');
+}
+
+async function renderTrusted() {
+  const list = await call('trusted.list');
+  const box = $('trusted-list');
+  box.textContent = '';
+  if (!list.length) { box.append(el('p', { class: 'muted small' }, 'No trusted sites yet.')); return; }
+  for (const name of list) {
+    box.append(el('div', { class: 'row-card' },
+      el('span', {}, el('b', {}, name)),
+      el('button', { onclick: async () => { await call('trusted.remove', name); say('trusted-msg', `${name} is no longer trusted.`); renderTrusted(); } }, 'Remove')));
+  }
+}
+
+$('trusted-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const name = await call('trusted.add', $('trusted-input').value);
+    $('trusted-input').value = '';
+    say('trusted-msg', `${name} is now trusted. Its sign-in will be kept.`);
+  } catch (err) { say('trusted-msg', errorText(err), true); }
+  renderTrusted();
+});
+
 render();
 renderBrowsers();
+renderTrusted();
+renderExceptions();
+renderGsb();
+window.mountAutoClear($('autoclear-history'), 'history');
+window.mountAutoClear($('autoclear-cookies'), 'cookies');

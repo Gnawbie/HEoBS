@@ -1,4 +1,19 @@
 node_modules/
+dist/
+
+# Built installer / apps (too large for git; publish as a GitHub release instead)
+/HEoBS_Setup.exe
+/HEoBS.exe
+/HEoBS_Test.exe
+
+# Test-build error logs can contain addresses of visited pages
+*.log
 
 # Password / data exports must never be committed
 *.csv
+
+# API keys and other secrets must never be committed
+/google-safe-browsing-key.txt
+/src/default-key.json
+*-key.txt
+*.key

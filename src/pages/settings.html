@@ -11,7 +11,8 @@
     <h1>Settings</h1>
     <nav class="toc">
       <a href="#search">Search engine</a>
-      <a href="#privacy">Trackers</a>
+      <a href="#privacy">Ads &amp; trackers</a>
+      <a href="#autoclear">Auto-clear</a>
       <a href="#passwords">Passwords</a>
       <a href="#import">Import</a>
       <a href="#addons">Add-ons</a>
@@ -32,11 +33,67 @@
     </section>
 
     <section id="privacy">
-      <h2>Trackers</h2>
-      <p class="muted">Trackers are blocked automatically. Each switch below is yours to turn off.</p>
+      <h2>Ads &amp; trackers</h2>
+      <p class="muted">Ads, pop-ups and trackers are blocked automatically. Each switch below is yours to turn off.</p>
       <div id="toggles"></div>
       <p id="privacy-stats" class="muted small"></p>
       <div id="top-blocked"></div>
+      <h3 id="gsb-setup">Google Safe Browsing (optional)</h3>
+      <p class="muted small">Adds Google's much larger list of dangerous sites on top of the built-in ones. It is free
+        from Google for non-commercial use and needs your own key, which takes about two minutes. HEoBS protects you
+        without it too.</p>
+      <ol class="steps">
+        <li><a class="button" target="_blank" href="https://console.cloud.google.com/projectcreate">1. Create a project</a>
+          <span class="muted small">Sign in to Google if asked, give the project any name, click Create.</span></li>
+        <li><a class="button" target="_blank" href="https://console.cloud.google.com/flows/enableapi?apiid=safebrowsing.googleapis.com">2. Turn on Safe Browsing</a>
+          <span class="muted small">Check your new project is selected, then confirm. Done when it says the API is enabled.</span></li>
+        <li><a class="button" target="_blank" href="https://console.cloud.google.com/apis/credentials">3. Create the key</a>
+          <span class="muted small">“Create credentials” → “API key”. Under API restrictions pick “Safe Browsing API”;
+            leave application restrictions on “None”. Click Create, then copy the key.</span></li>
+        <li><button id="gsb-paste" type="button" class="primary">4. Paste key and test it</button>
+          <span class="muted small">Takes the key from your clipboard and checks it with Google straight away.</span></li>
+      </ol>
+      <p class="muted small">If Google asks for a payment card at any step, stop: this API does not need one. Ignore any
+        “free trial” banner.</p>
+      <form id="gsb-form" class="inline">
+        <input id="gsb-key" type="password" placeholder="…or type the key here" autocomplete="off" spellcheck="false">
+        <button>Save key</button>
+        <button id="gsb-remove" type="button" hidden>Remove key</button>
+      </form>
+      <p id="gsb-status" class="muted small"></p>
+      <p id="gsb-msg" class="msg"></p>
+      <p class="muted small">The key is stored encrypted on this PC and is only ever sent to Google. Addresses are
+        checked on this PC; Google is asked to confirm only when a 4-byte fingerprint matches, and never receives the
+        address.</p>
+
+      <h3>Sites where blocking is switched off</h3>
+      <div id="sites-off"></div>
+      <h3>Sites allowed to open pop-ups</h3>
+      <div id="sites-popups"></div>
+      <p class="muted small">Add a site to either list from the shield button in the toolbar while you are on it.</p>
+    </section>
+
+    <section id="autoclear">
+      <h2>Auto-clear</h2>
+      <p class="muted">Have HEoBS tidy up after you automatically. Pick a preset or choose Custom for your own time.</p>
+      <div class="label-row"><b>History</b><div id="autoclear-history"></div></div>
+      <div class="label-row"><b>Cookies</b><div id="autoclear-cookies"></div></div>
+      <p class="muted small">Cookie age is counted from when a site first set the cookie. Clearing cookies signs you
+        out of the sites they belong to. Saved passwords and bookmarks are never auto-cleared.</p>
+
+      <h3>Trusted sites</h3>
+      <p class="muted">For a trusted site HEoBS keeps the cookies that hold your sign-in, through every auto-clear and
+        through “Clear browsing data”, so the site still recognises this browser and does not make you sign in or
+        verify again. Nothing more is kept: its history is cleared like any other site's, and trackers on it are
+        still blocked.</p>
+      <form id="trusted-form" class="inline">
+        <input id="trusted-input" type="text" placeholder="example.com" spellcheck="false" autocomplete="off">
+        <button>Add trusted site</button>
+      </form>
+      <div id="trusted-list"></div>
+      <p id="trusted-msg" class="msg"></p>
+      <p class="muted small">You can also trust the site you are on from the shield button in the toolbar. A site
+        can still sign you out itself, for example when its own session expires.</p>
     </section>
 
     <section id="passwords">
@@ -98,6 +155,7 @@
       <p id="versions" class="muted small"></p>
     </section>
   </main>
+  <script src="autoclear.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

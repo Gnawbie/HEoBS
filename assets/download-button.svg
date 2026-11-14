@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="72" viewBox="0 0 360 72" role="img" aria-label="Download HEoBS for Windows">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fbcff"/>
+      <stop offset="1" stop-color="#4c8bf0"/>
+    </linearGradient>
+  </defs>
+  <rect width="360" height="72" rx="16" fill="url(#g)"/>
+  <!-- download arrow -->
+  <g fill="none" stroke="#14161b" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 20v24"/>
+    <path d="M33 35l11 11 11-11"/>
+    <path d="M30 54h28"/>
+  </g>
+  <text x="78" y="33" font-family="Segoe UI, Arial, sans-serif" font-size="21" font-weight="700" fill="#14161b">Download HEoBS</text>
+  <text x="78" y="54" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#1f2a3d">Windows 10 / 11 installer</text>
+</svg>

@@ -64,6 +64,34 @@ function detectBrowsers() {
   return found;
 }
 
+/**
+ * Start-page shortcuts the user set up in Chrome-family browsers
+ * (stored as "custom_links" in the profile's Preferences file).
+ */
+function detectShortcuts() {
+  const found = [];
+  for (const [name, root] of chromiumRoots()) {
+    let dirs = [];
+    try {
+      dirs = ['.', ...fs.readdirSync(root, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && (d.name === 'Default' || /^Profile \d+$/.test(d.name)))
+        .map((d) => d.name)];
+    } catch { continue; }
+    for (const dir of dirs) {
+      try {
+        const prefs = JSON.parse(fs.readFileSync(path.join(root, dir, 'Preferences'), 'utf8'));
+        const list = ((prefs.custom_links && prefs.custom_links.list) || [])
+          .filter((l) => l && /^https?:\/\//i.test(l.url || ''))
+          .map((l) => ({ title: String(l.title || ''), url: String(l.url) }));
+        if (list.length) {
+          found.push({ id: `${name}|${dir}`, browser: name, profile: dir === '.' || dir === 'Default' ? '' : dir, count: list.length, list });
+        }
+      } catch { /* no preferences in this profile */ }
+    }
+  }
+  return found;
+}
+
 function decodeEntities(s) {
   return s.replace(/&(amp|lt|gt|quot|#39|#x27|apos);/g, (_m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'", apos: "'" }[e]));
 }
@@ -157,4 +185,4 @@ function parsePasswordCsv(text) {
   return out;
 }
 
-module.exports = { detectBrowsers, readChromiumBookmarks, parseBookmarksHtml, parsePasswordCsv, countUrls };
+module.exports = { detectShortcuts, detectBrowsers, readChromiumBookmarks, parseBookmarksHtml, parsePasswordCsv, countUrls };

@@ -99,3 +99,84 @@ button.primary:hover { background: #8bbaff; }
 /* dangerous-site warning */
 body.danger { background: #3a1416; }
 body.danger h1 { color: #ffb4ab; }
+
+/* auto-clear picker */
+.autoclear { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.autoclear .custom { display: flex; align-items: center; gap: 8px; }
+.autoclear .custom[hidden] { display: none; }
+.autoclear .msg { min-height: 0; }
+select, input[type="number"] {
+  height: 34px; padding: 0 10px;
+  background: #15171c; color: inherit; font: inherit;
+  border: 1px solid #343844; border-radius: 8px; outline: 0;
+}
+select:focus, input[type="number"]:focus { border-color: #6ea8fe; }
+input[type="number"] { width: 90px; }
+.label-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 0; }
+.label-row > b { font-weight: 500; min-width: 70px; }
+
+/* start page logo */
+.hero .logo { width: 96px; height: 96px; display: block; margin: 0 auto 14px; }
+
+/* start-page shortcuts */
+.hero { max-width: 760px; }
+.shortcuts { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 34px; }
+.shortcut {
+  position: relative; width: 116px; padding: 16px 8px 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  background: #22252d; border: 1px solid #2c303a; border-radius: 14px;
+  color: #e4e6eb; cursor: pointer;
+}
+.shortcut:hover { background: #2a2e38; border-color: #6ea8fe; text-decoration: none; }
+.shortcut .badge { width: 48px; height: 48px; display: grid; place-items: center; }
+/* the site's own icon */
+.shortcut .badge.site { background: #15171c; border-radius: 12px; }
+.shortcut .badge.site img { width: 30px; height: 30px; border-radius: 6px; object-fit: contain; }
+/* HEoBS default: the stop-sign shape from the logo, with the site's initial */
+.shortcut .badge.default {
+  background: linear-gradient(#8fbcff, #4c8bf0);
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+}
+.shortcut .badge.default span { font-size: 22px; font-weight: 800; color: #14161b; }
+.shortcut.add { background: none; border-style: dashed; border-color: #3a3f4c; }
+.shortcut.add .badge { font-size: 28px; font-weight: 300; color: #9096a3; }
+.shortcut.add:hover { background: #22252d; }
+.shortcut.add:hover .badge { color: #6ea8fe; }
+.shortcut .label { max-width: 100%; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shortcut .edit {
+  position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 8px; background: none; color: #9096a3; font-size: 16px; line-height: 1;
+  opacity: 0;
+}
+.shortcut:hover .edit, .shortcut .edit:focus-visible { opacity: 1; }
+.shortcut .edit:hover { background: #3a3f4c; color: #e4e6eb; }
+#import-row { margin-top: 22px; }
+.linklike { background: none; border: 0; padding: 4px 8px; color: #9096a3; font-size: 12.5px; }
+.linklike:hover { background: none; color: #6ea8fe; text-decoration: underline; }
+dialog p { margin: 0 0 12px; }
+
+dialog {
+  width: 380px; padding: 20px 22px; text-align: left;
+  background: #22252d; color: #e4e6eb; border: 1px solid #343844; border-radius: 12px;
+}
+dialog::backdrop { background: rgba(0, 0, 0, .55); }
+dialog h3 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
+dialog label { display: block; margin-bottom: 12px; font-size: 12px; color: #9096a3; }
+dialog input[type="text"] { height: 36px; margin-top: 4px; border-radius: 8px; font-size: 14px; padding: 0 12px; }
+dialog .msg { min-height: 1.2em; margin: 0 0 8px; font-size: 12.5px; }
+.dialog-buttons { display: flex; gap: 8px; align-items: center; }
+.dialog-buttons .spacer { flex: 1; }
+
+/* guided setup steps */
+.steps { list-style: none; padding: 0; margin: 12px 0; }
+.steps li { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+.steps li > a.button, .steps li > button { flex: none; min-width: 210px; text-align: left; }
+
+/* welcome box */
+dialog.wide { width: 520px; }
+dialog.wide p { line-height: 1.5; }
+dialog a.button.primary { background: #6ea8fe; border-color: #6ea8fe; color: #10131a; font-weight: 600; }
+dialog a.button.primary:hover { background: #8bbaff; }
+dialog input[type="password"] { margin-top: 4px; }
+button:disabled { opacity: .5; cursor: default; }
+#gsb-setup { scroll-margin-top: 20px; }

@@ -37,7 +37,7 @@ function hostOf(url) {
 }
 
 class Privacy {
-  constructor({ settings, userData, bundledList, fetch, onBlocked, onExtensionRequest, onDangerous }) {
+  constructor({ settings, userData, bundledList, fetch, onBlocked, onExtensionRequest, onDangerous, standIn }) {
     this.settings = settings;
     this.userList = path.join(userData, 'blocklist.txt');
     this.bundledList = bundledList;
@@ -49,6 +49,9 @@ class Privacy {
     this.blockedTotal = 0;
     this.blockedHosts = new Map();
     this.onDangerous = onDangerous;
+    this.standIn = standIn; // turns the engine's stand-in content into an address the browser will load
+    this.adblock = null; // set by main once the ad-filter engine has loaded
+    this.gsb = null;     // Google Safe Browsing client, set by main
     this.threatFile = path.join(userData, 'threats.txt');
     this.threats = new Map(); // hostname -> 'phishing' | 'malware'
     this.threatDate = 0;
@@ -132,6 +135,18 @@ class Privacy {
     return d.referrer || '';
   }
 
+  /** True when the user switched blocking off for the site in the address bar. */
+  isSiteOff(d) {
+    const list = this.settings.data.shieldsOffSites || [];
+    return list.length > 0 && list.includes(site(hostOf(this.topUrl(d))));
+  }
+
+  noteBlocked(d, host) {
+    this.blockedTotal++;
+    this.blockedHosts.set(host, (this.blockedHosts.get(host) || 0) + 1);
+    this.onBlocked?.(d.webContents, host);
+  }
+
   isThirdParty(d, host) {
     return site(hostOf(this.topUrl(d))) !== site(host);
   }
@@ -144,6 +159,8 @@ class Privacy {
       threatSize: this.threats.size,
       threatDate: this.threatDate,
       threatHosts: THREAT_LISTS.map((l) => l.host),
+      adEngineReady: !!(this.adblock && this.adblock.engine),
+      adEngineDate: this.adblock ? this.adblock.date : 0,
       blockedTotal: this.blockedTotal,
       topBlocked: [...this.blockedHosts].sort((a, b) => b[1] - a[1]).slice(0, 15),
     };
@@ -171,24 +188,55 @@ class Privacy {
         return cb({ cancel: true });
       }
 
-      if (d.resourceType === 'mainFrame') {
-        if (s().stripTrackingParams && u.search) {
-          let changed = false;
-          for (const key of [...u.searchParams.keys()]) {
-            if (TRACKING_PARAMS.has(key.toLowerCase())) { u.searchParams.delete(key); changed = true; }
+      // Everything below runs once the address is known not to be dangerous.
+      const proceed = () => {
+        if (d.resourceType === 'mainFrame') {
+          if (s().stripTrackingParams && u.search) {
+            let changed = false;
+            for (const key of [...u.searchParams.keys()]) {
+              if (TRACKING_PARAMS.has(key.toLowerCase())) { u.searchParams.delete(key); changed = true; }
+            }
+            if (changed) return cb({ redirectURL: u.toString() });
           }
-          if (changed) return cb({ redirectURL: u.toString() });
+          return cb({});
         }
-        return cb({});
-      }
 
-      if (s().blockTrackers && this.isListed(u.hostname) && this.isThirdParty(d, u.hostname)) {
-        this.blockedTotal++;
-        this.blockedHosts.set(u.hostname, (this.blockedHosts.get(u.hostname) || 0) + 1);
-        this.onBlocked?.(d.webContents, u.hostname);
-        return cb({ cancel: true });
-      }
-      cb({});
+        if (this.isSiteOff(d)) return cb({});
+
+        const listed = s().blockTrackers && this.isListed(u.hostname) && this.isThirdParty(d, u.hostname);
+        const blockIfListed = () => {
+          if (!listed) return cb({});
+          this.noteBlocked(d, u.hostname);
+          cb({ cancel: true });
+        };
+
+        // The ad filter engine is asked first: where it can, it swaps an ad
+        // script for a harmless stand-in instead of just cancelling it, so the
+        // page cannot tell anything was blocked. The plain blocklist is the
+        // fallback for everything the engine lets through.
+        const engine = s().blockAds && this.adblock && this.adblock.engine;
+        if (!engine) return blockIfListed();
+        try {
+          engine.onBeforeRequest(d, (res) => {
+            if (res && res.redirectURL) { this.noteBlocked(d, u.hostname); return cb({ redirectURL: this.standIn ? this.standIn(res.redirectURL) : res.redirectURL }); }
+            if (res && res.cancel) { this.noteBlocked(d, u.hostname); return cb({ cancel: true }); }
+            blockIfListed();
+          });
+        } catch { blockIfListed(); }
+      };
+
+      // Google Safe Browsing (optional, needs the user's own key): pages and
+      // frames are checked against Google's lists held on this PC. `check`
+      // answers at once unless a fingerprint matched and Google must confirm.
+      const isDoc = d.resourceType === 'mainFrame' || d.resourceType === 'subFrame';
+      const pending = isDoc && this.gsb && /^https?:$/.test(u.protocol) && !this.threatAllowed.has(u.hostname.toLowerCase())
+        ? this.gsb.check(d.url) : null;
+      if (!pending) return proceed();
+      pending.then((kind) => {
+        if (!kind) return proceed();
+        if (d.resourceType === 'mainFrame') this.onDangerous?.(d.webContents, d.url, kind, 'google');
+        cb({ cancel: true });
+      }, proceed);
     });
 
     ses.webRequest.onBeforeSendHeaders((d, cb) => {
@@ -205,7 +253,12 @@ class Privacy {
       if (headers && s().blockThirdPartyCookies && d.resourceType !== 'mainFrame' && this.isThirdParty(d, hostOf(d.url))) {
         for (const k of Object.keys(headers)) if (k.toLowerCase() === 'set-cookie') delete headers[k];
       }
-      cb({ responseHeaders: headers });
+      // Let the ad filter engine add page restrictions that stop inline ad scripts.
+      const engine = s().blockAds && this.adblock && this.adblock.engine;
+      if (!engine || !headers || this.isSiteOff(d)) return cb({ responseHeaders: headers });
+      try {
+        engine.onHeadersReceived({ ...d, responseHeaders: headers }, (res) => cb({ responseHeaders: (res && res.responseHeaders) || headers }));
+      } catch { cb({ responseHeaders: headers }); }
     });
   }
 }

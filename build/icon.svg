@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- HEoBS icon: a stop sign with horns and an H -->
+  <defs>
+    <linearGradient id="sign" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fbcff"/>
+      <stop offset="1" stop-color="#4c8bf0"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="210" fill="#1b1d23"/>
+  <!-- horns -->
+  <path d="M356 372 C250 352 168 270 176 132 C222 232 300 262 420 268 Z" fill="#e9ebf0"/>
+  <path d="M668 372 C774 352 856 270 848 132 C802 232 724 262 604 268 Z" fill="#e9ebf0"/>
+  <!-- stop sign -->
+  <polygon points="386,262 638,262 816,440 816,692 638,870 386,870 208,692 208,440" fill="url(#sign)"/>
+  <polygon points="398,292 626,292 786,452 786,680 626,840 398,840 238,680 238,452" fill="none" stroke="#1b1d23" stroke-opacity=".28" stroke-width="14"/>
+  <!-- H -->
+  <path d="M372 396 h92 v122 h96 v-122 h92 v340 h-92 v-130 h-96 v130 h-92 Z" fill="#14161b"/>
+</svg>

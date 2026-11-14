@@ -63,4 +63,8 @@ document.getElementById('clear').addEventListener('click', async () => {
   render();
 });
 
-window.heobs.call('history').then((data) => { entries = data; render(); });
+const load = () => window.heobs.call('history').then((data) => { entries = data; render(); });
+const autoclear = document.getElementById('autoclear');
+autoclear.addEventListener('autoclear-changed', load);
+window.mountAutoClear(autoclear, 'history');
+load();
