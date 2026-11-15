@@ -761,6 +761,7 @@ class BrowserWin {
       { type: 'separator' },
       k('Developer tools', 'F12', () => this.shown?.view.webContents.toggleDevTools()),
       { label: 'Clear browsing data…', click: () => clearBrowsingData(this) },
+      { label: 'Send crash reports…', click: () => sendCrashReports(this) },
       ...(errorLog.enabled ? [{ label: 'Open error log (test build)', click: () => { fs.appendFileSync(errorLog.logFile, ''); shell.openPath(errorLog.logFile); } }] : []),
       { type: 'separator' },
       { label: 'Exit', click: () => app.quit() },
@@ -992,6 +993,58 @@ function logCrash(what, reason, code) {
   crashLog.save();
 }
 
+const REPORT_URL = 'https://github.com/Gnawbie/HEoBS/issues/new';
+const REPORT_MAX_CRASHES = 25;
+
+/** The text of a crash report: versions and the list of crashes. No addresses, no page content, no dump files. */
+function crashReportText() {
+  const lines = [
+    'HEoBS ' + app.getVersion() + (errorLog.enabled ? ' (test mode)' : ''),
+    'Electron ' + process.versions.electron + ', Chromium ' + process.versions.chrome,
+    'Windows ' + require('node:os').release() + ' ' + process.arch,
+    '',
+    'Crashes (newest first):',
+  ];
+  for (const c of crashLog.data.slice(0, REPORT_MAX_CRASHES)) {
+    lines.push('- ' + new Date(c.time).toISOString() + ' | ' + c.what + ' | ' + c.reason + ' | exit code ' + c.code);
+  }
+  if (crashLog.data.length > REPORT_MAX_CRASHES) lines.push('(' + (crashLog.data.length - REPORT_MAX_CRASHES) + ' older crashes not listed)');
+  return lines.join('\n');
+}
+
+/** Menu: "Send crash reports". Nothing leaves the PC until the user submits the form on GitHub themselves. */
+async function sendCrashReports(bw) {
+  if (!crashLog.data.length) {
+    dialog.showMessageBox(bw.win, {
+      type: 'info', buttons: ['OK'], message: 'No crashes to report',
+      detail: settings.data.crashReports
+        ? 'HEoBS has not recorded any crashes on this PC.'
+        : 'Crash reports are switched off. Turn them on under Settings → Crash Reports to record future crashes.',
+    });
+    return;
+  }
+  const text = crashReportText();
+  const { response } = await dialog.showMessageBox(bw.win, {
+    type: 'question',
+    buttons: ['Open report on GitHub', 'Copy report', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+    message: 'Send crash reports to the HEoBS developer?',
+    detail: 'This is everything that will be in the report:\n\n' + text +
+      '\n\nIt has no web addresses, page content or crash dump files. HEoBS opens a pre-filled report form on github.com in a new tab; ' +
+      'nothing is sent until you press the submit button there. Reports on GitHub are public and need a free GitHub account. ' +
+      '"Copy report" puts the text on the clipboard instead, to send some other way.',
+  });
+  if (response === 1) { clipboard.writeText(text); return; }
+  if (response !== 0) return;
+  const q = new URLSearchParams({
+    title: 'Crash report: HEoBS ' + app.getVersion(),
+    body: 'What I was doing when it crashed:\n\n(please describe)\n\n---\n```\n' + text + '\n```\n',
+  });
+  bw.newTab(REPORT_URL + '?' + q);
+}
+
 function listCrashDumps() {
   const out = [];
   const walk = (dir, depth) => {
@@ -1046,7 +1099,7 @@ function upfrontReport() {
   const engineHost = hostOf(s.searchUrl.replace('%s', 'x'));
   const engine = ENGINES.find((e) => e.url === s.searchUrl);
   return {
-    builtIn: 'None. HEoBS has no analytics, telemetry, crash reporting, advertising IDs, accounts or sync. Nothing about how you use it is sent to its authors or anyone else.',
+    builtIn: 'None. HEoBS has no analytics, telemetry, automatic crash reporting, advertising IDs, accounts or sync. Nothing about how you use it is sent to its authors or anyone else unless you send it yourself.',
     connections: [
       {
         who: engineHost,
@@ -1100,7 +1153,7 @@ function upfrontReport() {
     absent: [
       'Search suggestions as you type — nothing is sent until you press Enter.',
       'Sending the addresses you visit to anyone for checking — safe browsing compares them against lists stored on this PC.',
-      'Uploading crash reports — they are saved on this PC only (see Crash Reports).',
+      'Uploading crash reports by itself — they are saved on this PC only. "Send crash reports" in the menu shows you the report and opens a form on github.com; nothing is sent unless you submit that form.',
       'Usage statistics or telemetry of any kind.',
       'Cloud anything — HEoBS is an on-machine browser. Bookmarks, history and passwords exist only on this PC; there is no account and no sync.',
       'Silent updates — HEoBS does not check for updates yet. When it does, it will only tell you one is available and ask; it will never update itself.',

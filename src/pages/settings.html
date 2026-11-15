@@ -140,8 +140,10 @@
     <section id="crash">
       <h2>Crash Reports</h2>
       <p class="muted">When HEoBS or a tab crashes, a report is saved on this PC so the problem can be diagnosed.
-        Reports are never uploaded. A crash dump can contain parts of the pages that were open, so only share one
-        with someone you trust.</p>
+        HEoBS never uploads them by itself. To report crashes to the developer, use <b>Send crash reports</b> in the
+        main menu: it shows you the report (versions and the list of crashes, nothing else) and opens a form on
+        github.com that you submit yourself. A crash dump file can contain parts of the pages that were open, so it is
+        never included; only share one with someone you trust.</p>
       <label class="choice"><input id="crash-toggle" type="checkbox">
         <span><b>Save crash reports on this PC</b><small class="muted">Takes effect the next time HEoBS starts.</small></span></label>
       <p id="crash-status" class="muted small"></p>
