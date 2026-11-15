@@ -79,7 +79,26 @@ class AdBlock {
       let top = url;
       try { top = event.sender.getURL() || url; } catch { /* page gone */ }
       if (!this.isActiveFor(top)) return undefined;
-      return inject(event, url, msg);
+      // The engine runs each of its page scripts as-is, side by side. Two that
+      // define the same helper then collide ("already declared") and never
+      // run, their helpers end up as page globals, and the error is visible to
+      // the page. Give every script its own private scope and keep its errors
+      // to itself.
+      const sender = event.sender;
+      const quiet = {
+        frameId: event.frameId,
+        processId: event.processId,
+        sender: {
+          insertCSS: (...args) => sender.insertCSS(...args),
+          executeJavaScript: (code, gesture) => {
+            const wrapped = '(function(){try{(function(){' + code + '\n})()}catch(e){}})();';
+            const done = sender.executeJavaScript(wrapped, gesture);
+            if (done && done.catch) done.catch(() => {});
+            return done;
+          },
+        },
+      };
+      return inject(quiet, url, msg);
     };
     // This also installs the engine's own request hooks; HEoBS replaces them
     // straight afterwards with its combined handler (see privacy.js).

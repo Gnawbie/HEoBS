@@ -1,7 +1,7 @@
 {
   "name": "heobs",
   "productName": "HEoBS",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A home-built desktop web browser on the Chromium engine (Electron).",
   "main": "src/main.js",
   "private": true,

@@ -56,6 +56,10 @@ class Privacy {
     this.threats = new Map(); // hostname -> 'phishing' | 'malware'
     this.threatDate = 0;
     this.threatAllowed = new Set(); // "proceed anyway", until HEoBS closes
+    // Pages whose own security policy only lets them load from listed
+    // addresses. A stand-in is refused there, and the refusal is reported to
+    // the site, so on those pages a blocked request is simply cancelled.
+    this.strictPages = new Map(); // webContents id -> true
     this.loadList();
     this.loadThreats();
   }
@@ -218,7 +222,11 @@ class Privacy {
         if (!engine) return blockIfListed();
         try {
           engine.onBeforeRequest(d, (res) => {
-            if (res && res.redirectURL) { this.noteBlocked(d, u.hostname); return cb({ redirectURL: this.standIn ? this.standIn(res.redirectURL) : res.redirectURL }); }
+            if (res && res.redirectURL) {
+              this.noteBlocked(d, u.hostname);
+              if (this.strictPages.get(d.webContentsId)) return cb({ cancel: true });
+              return cb({ redirectURL: this.standIn ? this.standIn(res.redirectURL) : res.redirectURL });
+            }
             if (res && res.cancel) { this.noteBlocked(d, u.hostname); return cb({ cancel: true }); }
             blockIfListed();
           });
@@ -250,6 +258,13 @@ class Privacy {
 
     ses.webRequest.onHeadersReceived((d, cb) => {
       const headers = d.responseHeaders;
+      if (d.resourceType === 'mainFrame' && d.webContentsId != null) {
+        let strict = false;
+        for (const k of Object.keys(headers || {})) {
+          if (k.toLowerCase() === 'content-security-policy' && /(^|[;,\s])(default|script|connect|img)-src\s/i.test([].concat(headers[k]).join(';'))) strict = true;
+        }
+        if (strict) this.strictPages.set(d.webContentsId, true); else this.strictPages.delete(d.webContentsId);
+      }
       if (headers && s().blockThirdPartyCookies && d.resourceType !== 'mainFrame' && this.isThirdParty(d, hostOf(d.url))) {
         for (const k of Object.keys(headers)) if (k.toLowerCase() === 'set-cookie') delete headers[k];
       }
